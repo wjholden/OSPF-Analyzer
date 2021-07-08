@@ -30,13 +30,13 @@ public class SNMPv3Test {
         //If the specified SNMP engine id is specified, this user can only be used with the specified engine ID
         //So if it's not correct, will get an error that can't find a user from the user table.
         //snmp.getUSM().addUser(new OctetString("nmsAdmin"), new OctetString("0002651100"), user);
-        //snmp.getUSM().addUser(new OctetString("admin"), user);
+        snmp.getUSM().addUser(new OctetString("admin"), user);
         UserTarget target = new UserTarget();
         target.setVersion(SnmpConstants.version3);
         target.setAddress(new UdpAddress("192.168.0.1/161"));
         //target.setSecurityLevel(SecurityLevel.AUTH_PRIV);
         target.setSecurityLevel(SecurityLevel.NOAUTH_NOPRIV);
-        target.setSecurityName(new OctetString("ANON"));
+        target.setSecurityName(new OctetString("admin"));
         target.setTimeout(3000);    //3s
         target.setRetries(0);
         OctetString contextEngineId = new OctetString("0002651100[02]");

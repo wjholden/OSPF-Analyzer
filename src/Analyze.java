@@ -4,6 +4,8 @@ import org.snmp4j.Target;
 import org.snmp4j.fluent.SnmpBuilder;
 import org.snmp4j.fluent.SnmpCompletableFuture;
 import org.snmp4j.fluent.TargetBuilder;
+import org.snmp4j.security.AuthSHA;
+import org.snmp4j.security.SecurityProtocols;
 import org.snmp4j.smi.Address;
 import org.snmp4j.smi.GenericAddress;
 import org.snmp4j.smi.IpAddress;
