@@ -25,13 +25,24 @@ public class A3 {
 
         SnmpContext context = SnmpFactory.getInstance().newContext(target, mib);
         try {
-            VarbindCollection result = context.getNext("sysUpTime").get();
-            System.out.println(result.get("sysUpTime"));
+            //VarbindCollection result = context.getNext("sysUpTime").get();
+            //System.out.println(result.get("sysUpTime"));
+
             //List<VarbindCollection> rows = context.getBulk(1, 50,
-            //        "sysUpTime", "ifName", "ifInOctets", "ifOutOctets", "ospfLsdbEntry").get();
+            //        "sysUpTime", "ifName", "ifInOctets", "ifOutOctets", "ospfLsdbAdvertisement").get();
             //for (VarbindCollection row : rows) {
             //    System.out.println(row);
             //}
+
+            int i = 0;
+            final String[] columns = { "ospfLsdbAdvertisement" };
+            VarbindCollection row = context.getNext(columns).get();
+            while (row.get("ospfLsdbAdvertisement") != null) {
+                System.out.println(row.get("ospfLsdbAdvertisement"));
+                row = context.getNext(row.nextIdentifiers("ospfLsdbAdvertisement")).get();
+                i++;
+            }
+            System.out.println("LSDB size is " + i);
         } finally {
             context.close();
         }
