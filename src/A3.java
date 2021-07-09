@@ -3,9 +3,18 @@ import org.snmp4j.security.SecurityProtocols;
 import org.soulwing.snmp.*;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 public class A3 {
+
+    public static List<Integer> octetString(String s) {
+        // Note: Byte does not work in Java because Byte is unsigned and cannot accept a value above +127.
+        return Arrays.stream(s.split(":")).map(i -> Integer.valueOf(i, 16)).collect(Collectors.toList());
+    }
+
     public static void main (String args[]) throws IOException {
         Mib mib = MibFactory.getInstance().newMib();
         mib.load("SNMPv2-MIB");
@@ -48,7 +57,9 @@ public class A3 {
             //SnmpWalker<VarbindCollection> walker = context.walk(1, "ospfLsdbAdvertisement");
             VarbindCollection row = walker.next().get();
             while (row != null) {
-                System.out.println(row);
+                String octets = row.get("ospfLsdbAdvertisement").asString();
+                List<Integer> lsa = octetString(octets);
+                System.out.println(lsa);
                 //System.out.println(row.get("sysName") + " " + row.get("ospfLsdbAdvertisement"));
                 row = walker.next().get();
                 i++;
