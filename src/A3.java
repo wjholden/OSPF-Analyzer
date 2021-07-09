@@ -23,8 +23,7 @@ public class A3 {
         //target.setAuthPassphrase("cisco123");
         //target.setPrivPassphrase("cisco123");
 
-        SnmpContext context = SnmpFactory.getInstance().newContext(target, mib);
-        try {
+        try (SnmpContext context = SnmpFactory.getInstance().newContext(target, mib)) {
             //VarbindCollection result = context.getNext("sysUpTime").get();
             //System.out.println(result.get("sysUpTime"));
 
@@ -34,17 +33,27 @@ public class A3 {
             //    System.out.println(row);
             //}
 
+            //int i = 0;
+            //final String[] columns = { "ospfLsdbAdvertisement" };
+            //VarbindCollection row = context.getNext(columns).get();
+            //while (row.get("ospfLsdbAdvertisement") != null) {
+            //    System.out.println(row.get("ospfLsdbAdvertisement"));
+            //    row = context.getNext(row.nextIdentifiers("ospfLsdbAdvertisement")).get();
+            //    i++;
+            //}
+            //System.out.println("LSDB size is " + i);
+
             int i = 0;
-            final String[] columns = { "ospfLsdbAdvertisement" };
-            VarbindCollection row = context.getNext(columns).get();
-            while (row.get("ospfLsdbAdvertisement") != null) {
-                System.out.println(row.get("ospfLsdbAdvertisement"));
-                row = context.getNext(row.nextIdentifiers("ospfLsdbAdvertisement")).get();
+            SnmpWalker<VarbindCollection> walker = context.walk(1, "sysName", "ospfLsdbAdvertisement");
+            //SnmpWalker<VarbindCollection> walker = context.walk(1, "ospfLsdbAdvertisement");
+            VarbindCollection row = walker.next().get();
+            while (row != null) {
+                System.out.println(row);
+                //System.out.println(row.get("sysName") + " " + row.get("ospfLsdbAdvertisement"));
+                row = walker.next().get();
                 i++;
             }
-            System.out.println("LSDB size is " + i);
-        } finally {
-            context.close();
+            System.out.println("Count: " + i);
         }
     }
 }
