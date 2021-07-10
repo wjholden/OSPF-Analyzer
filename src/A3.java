@@ -1,9 +1,9 @@
+import org.apache.shiro.codec.Hex;
 import org.snmp4j.security.AuthSHA;
 import org.snmp4j.security.SecurityProtocols;
 import org.soulwing.snmp.*;
 
 import java.io.IOException;
-import java.net.InetAddress;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -56,7 +56,9 @@ public class A3 {
             SnmpWalker<VarbindCollection> walker = context.walk(1, "sysName", "ospfLsdbAdvertisement");
             //SnmpWalker<VarbindCollection> walker = context.walk(1, "ospfLsdbAdvertisement");
             VarbindCollection row = walker.next().get();
+            System.out.println(row.getClass().getName());
             while (row != null) {
+                System.out.println(Arrays.toString((byte[]) row.get("ospfLsdbAdvertisement").toObject()));
                 String octets = row.get("ospfLsdbAdvertisement").asString();
                 List<Integer> lsa = octetString(octets);
                 System.out.println(lsa);
@@ -66,5 +68,6 @@ public class A3 {
             }
             System.out.println("Count: " + i);
         }
+
     }
 }
