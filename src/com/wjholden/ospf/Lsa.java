@@ -1,22 +1,21 @@
 package com.wjholden.ospf;
 
-import java.util.List;
+import java.net.UnknownHostException;
 
 public abstract class Lsa {
-    public static Lsa getInstance(List<Short> octetString) {
-        final int type = octetString.get(3);
-        switch (octetString.get(3)) {
-            case 1:
-                return new RouterLsa(octetString);
-            case 2:
-                return new NetworkLsa(octetString);
-            default:
-                throw new UnsupportedOperationException("Type " + type + " is not supported.");
+    public static Lsa getInstance(byte[] lsa) {
+        try {
+            switch (lsa[3]) {
+                case 1:
+                    return new RouterLsa(lsa);
+                case 2:
+                    return new NetworkLsa(lsa);
+                default:
+                    throw new UnsupportedOperationException("Type " + lsa[3] + " is not supported.");
+            }
+        } catch (UnknownHostException ex) {
+            ex.printStackTrace();
+            return null;
         }
     }
-
-    private static int getType(List<Short> octetString) {
-        return octetString.get(3);
-    }
-
 }

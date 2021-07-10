@@ -1,3 +1,4 @@
+import com.wjholden.ospf.Lsa;
 import org.apache.shiro.codec.Hex;
 import org.snmp4j.security.AuthSHA;
 import org.snmp4j.security.SecurityProtocols;
@@ -9,11 +10,6 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 public class A3 {
-
-    public static List<Integer> octetString(String s) {
-        // Note: Byte does not work in Java because Byte is unsigned and cannot accept a value above +127.
-        return Arrays.stream(s.split(":")).map(i -> Integer.valueOf(i, 16)).collect(Collectors.toList());
-    }
 
     public static void main (String args[]) throws IOException {
         Mib mib = MibFactory.getInstance().newMib();
@@ -29,40 +25,18 @@ public class A3 {
         target.setPrivType(SnmpV3Target.PrivType.AES128);
         target.setAuthPassphrase(System.getProperty("tnm4j.agent.auth.password", "cisco123"));
         target.setPrivPassphrase(System.getProperty("tnm4j.agent.priv.password", "cisco123"));
-        //target.setAuthPassphrase("cisco123");
-        //target.setPrivPassphrase("cisco123");
 
         try (SnmpContext context = SnmpFactory.getInstance().newContext(target, mib)) {
-            //VarbindCollection result = context.getNext("sysUpTime").get();
-            //System.out.println(result.get("sysUpTime"));
-
-            //List<VarbindCollection> rows = context.getBulk(1, 50,
-            //        "sysUpTime", "ifName", "ifInOctets", "ifOutOctets", "ospfLsdbAdvertisement").get();
-            //for (VarbindCollection row : rows) {
-            //    System.out.println(row);
-            //}
-
-            //int i = 0;
-            //final String[] columns = { "ospfLsdbAdvertisement" };
-            //VarbindCollection row = context.getNext(columns).get();
-            //while (row.get("ospfLsdbAdvertisement") != null) {
-            //    System.out.println(row.get("ospfLsdbAdvertisement"));
-            //    row = context.getNext(row.nextIdentifiers("ospfLsdbAdvertisement")).get();
-            //    i++;
-            //}
-            //System.out.println("LSDB size is " + i);
-
             int i = 0;
             SnmpWalker<VarbindCollection> walker = context.walk(1, "sysName", "ospfLsdbAdvertisement");
             //SnmpWalker<VarbindCollection> walker = context.walk(1, "ospfLsdbAdvertisement");
+
             VarbindCollection row = walker.next().get();
             System.out.println(row.getClass().getName());
             while (row != null) {
-                System.out.println(Arrays.toString((byte[]) row.get("ospfLsdbAdvertisement").toObject()));
-                String octets = row.get("ospfLsdbAdvertisement").asString();
-                List<Integer> lsa = octetString(octets);
-                System.out.println(lsa);
-                //System.out.println(row.get("sysName") + " " + row.get("ospfLsdbAdvertisement"));
+                byte[] lsa = (byte[]) row.get("ospfLsdbAdvertisement").toObject();
+                //System.out.println(Arrays.toString(lsa));
+                System.out.println(Lsa.getInstance(lsa));
                 row = walker.next().get();
                 i++;
             }
