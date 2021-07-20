@@ -6,15 +6,13 @@ import java.util.*;
 
 public class RouterLsa extends Lsa {
     public final InetAddress routerId;
-    public final int length, links;
+    public final int links;
     public final List<Link> adjacencies = new ArrayList<>();
 
     public RouterLsa(byte[] lsa) throws UnknownHostException {
-        routerId = InetAddress.getByAddress(Arrays.copyOfRange(lsa, 4, 8));
+        super(lsa);
 
-        final int length = (lsa[18] << 8) | lsa[19];
-        assert(length == lsa.length);
-        this.length = lsa.length;
+        routerId = InetAddress.getByAddress(Arrays.copyOfRange(lsa, 4, 8));
 
         final int links = (lsa[22] << 8) | lsa[23];
         this.links = links;
@@ -59,7 +57,7 @@ public class RouterLsa extends Lsa {
         @Override
         public String toString() {
             String s = "";
-            s += "[Type " + type + "] " + networkLsaType.get(type) + ". ";
+            s += "[Type " + type + "] [Metric = " + metric + "]. " + networkLsaType.get(type) + ". ";
             s += connectedObject.get(type) + " is " + linkId.getHostAddress() + ". ";
             s += linkDataMeaning.get(type) + " is " + linkData.getHostAddress();
             return s;
@@ -73,6 +71,6 @@ public class RouterLsa extends Lsa {
         for (Link l : adjacencies) {
             s += "\n * " + l.toString();
         }
-        return s.trim();
+        return s;
     }
 }

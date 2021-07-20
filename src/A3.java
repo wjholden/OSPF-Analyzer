@@ -1,13 +1,9 @@
 import com.wjholden.ospf.Lsa;
-import org.apache.shiro.codec.Hex;
 import org.snmp4j.security.AuthSHA;
 import org.snmp4j.security.SecurityProtocols;
 import org.soulwing.snmp.*;
 
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.List;
-import java.util.stream.Collectors;
 
 public class A3 {
 
