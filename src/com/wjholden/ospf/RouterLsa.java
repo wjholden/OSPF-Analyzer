@@ -69,7 +69,7 @@ public class RouterLsa extends Lsa {
         String s = String.format("[Router ID %s]", routerId.getHostAddress(), length,
                 links);
         for (Link l : adjacencies) {
-            s += "\n * " + l.toString();
+            s += "\n * Attached Router: " + l.toString();
         }
         return s;
     }

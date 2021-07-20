@@ -1,13 +1,29 @@
 import com.wjholden.ospf.Lsa;
+import org.neo4j.dbms.api.DatabaseManagementService;
+import org.neo4j.dbms.api.DatabaseManagementServiceBuilder;
+import org.neo4j.graphdb.GraphDatabaseService;
+import org.neo4j.graphdb.RelationshipType;
 import org.snmp4j.security.AuthSHA;
 import org.snmp4j.security.SecurityProtocols;
 import org.soulwing.snmp.*;
+import static org.neo4j.configuration.GraphDatabaseSettings.DEFAULT_DATABASE_NAME;
 
 import java.io.IOException;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 public class A3 {
 
     public static void main (String args[]) throws IOException {
+        final Path databaseDirectory = Files.createTempDirectory(DEFAULT_DATABASE_NAME);
+        System.out.println(databaseDirectory);
+
+        // create the database
+        final DatabaseManagementService managementService = new DatabaseManagementServiceBuilder(databaseDirectory).build();
+        final GraphDatabaseService graphDb = managementService.database(DEFAULT_DATABASE_NAME);
+        registerShutdownHook(managementService);
+
         Mib mib = MibFactory.getInstance().newMib();
         mib.load("SNMPv2-MIB");
         mib.load("IF-MIB");
@@ -38,6 +54,24 @@ public class A3 {
             }
             System.out.println("Count: " + i);
         }
+    }
 
+    private static void registerShutdownHook( final DatabaseManagementService managementService )
+    {
+        // Registers a shutdown hook for the Neo4j instance so that it
+        // shuts down nicely when the VM exits (even if you "Ctrl-C" the
+        // running application).
+        Runtime.getRuntime().addShutdownHook( new Thread()
+        {
+            @Override
+            public void run()
+            {
+                managementService.shutdown();
+            }
+        } );
+    }
+
+    private enum RelTypes implements RelationshipType {
+        LINKED
     }
 }
