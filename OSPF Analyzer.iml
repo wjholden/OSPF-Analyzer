@@ -9,5 +9,7 @@
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="library" name="org.neo4j:neo4j:4.3.2" level="project" />
     <orderEntry type="library" name="org.soulwing.snmp:tnm4j:1.0.11" level="project" />
+    <orderEntry type="library" name="org.neo4j.gds:core:1.6.3" level="project" />
+    <orderEntry type="library" name="org.neo4j.gds:proc:1.6.3" level="project" />
   </component>
 </module>
