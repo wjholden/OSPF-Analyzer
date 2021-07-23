@@ -1,5 +1,7 @@
 package com.wjholden.ospf;
 
+import org.neo4j.cypher.internal.expressions.In;
+
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.*;
@@ -30,7 +32,7 @@ public class RouterLsa extends Lsa {
         }
     }
 
-    private static class Link {
+    public static class Link {
         public int type, tos, metric;
         public InetAddress linkId, linkData;
 
@@ -72,5 +74,25 @@ public class RouterLsa extends Lsa {
             s += "\n * Attached Router: " + l.toString();
         }
         return s;
+    }
+
+    public Map<InetAddress, Integer> getAdjacentRouters() {
+        Map<InetAddress, Integer> adj = new HashMap<>();
+        for (Link link : adjacencies) {
+            if (link.type == 1) {
+                adj.put(link.linkId, link.metric);
+            }
+        }
+        return adj;
+    }
+
+    public Map<InetAddress, Integer> getAdjacentNetworks() {
+        Map<InetAddress, Integer> net = new HashMap<>();
+        for (Link link : adjacencies) {
+            if (link.type == 2) {
+                net.put(link.linkData, link.metric);
+            }
+        }
+        return net;
     }
 }

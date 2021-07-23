@@ -23,17 +23,8 @@ public class NetworkLsa extends Lsa {
         }
         assert(attachedRouters.size() == (lsa.length - base) / 4);
 
-        int prefixLength = 0;
-        for (int i = 0 ; i < 4 ; i++) {
-            prefixLength += Integer.bitCount(Byte.toUnsignedInt(lsa[20 + i]));
-        }
-        this.prefixLength = prefixLength;
-
-        final byte[] prefixAddress = new byte[4];
-        for (int i = 0 ; i < 4 ; i++) {
-            prefixAddress[i] = (byte) (designatedRouter.getAddress()[i] & mask.getAddress()[i]);
-        }
-        prefix = InetAddress.getByAddress(prefixAddress);
+        this.prefixLength = getPrefixLength(mask);
+        this.prefix = getPrefixAddress(designatedRouter, mask);
     }
 
     @Override
@@ -46,5 +37,9 @@ public class NetworkLsa extends Lsa {
             s += "\n * " + r.getHostAddress();
         }
         return s;
+    }
+
+    public String getPrefix() {
+        return this.prefix.getHostAddress() + "/" + prefixLength;
     }
 }

@@ -1,4 +1,6 @@
 import com.wjholden.ospf.Lsa;
+import com.wjholden.ospf.NetworkLsa;
+import com.wjholden.ospf.RouterLsa;
 import org.neo4j.common.DependencyResolver;
 import org.neo4j.dbms.api.DatabaseManagementService;
 import org.neo4j.dbms.api.DatabaseManagementServiceBuilder;
@@ -7,8 +9,7 @@ import org.neo4j.graphalgo.betweenness.BetweennessCentralityStreamProc;
 import org.neo4j.graphalgo.centrality.ClosenessCentralityProc;
 import org.neo4j.graphalgo.functions.AsNodeFunc;
 import org.neo4j.graphalgo.pagerank.PageRankStreamProc;
-import org.neo4j.graphdb.GraphDatabaseService;
-import org.neo4j.graphdb.RelationshipType;
+import org.neo4j.graphdb.*;
 import org.neo4j.kernel.api.procedure.GlobalProcedures;
 import org.neo4j.kernel.internal.GraphDatabaseAPI;
 import org.snmp4j.security.AuthSHA;
@@ -18,14 +19,14 @@ import org.soulwing.snmp.*;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import static org.neo4j.configuration.GraphDatabaseSettings.DEFAULT_DATABASE_NAME;
 
 public class A3 {
+
+    private static final Label ROUTER = Label.label("ROUTER");
+    private static final Label NETWORK = Label.label("NETWORK");
 
     public static void main (String args[]) throws IOException, KernelException {
         final Path databaseDirectory = Files.createTempDirectory(DEFAULT_DATABASE_NAME);
@@ -79,8 +80,90 @@ public class A3 {
             proceduresRegistry.registerFunction(f);
         }
 
-        List<Lsa> lsdb = snmpwalk();
+        // Get the OSPFv2 LSAs out of a router using SNMP.
+        List<Lsa> lsdb = walkOspfLsdbMib();
         lsdb.forEach(System.out::println);
+
+        Map<String, RouterLsa> routerIds = new HashMap<>();
+        Map<String, NetworkLsa> networks = new HashMap<>();
+        Map<Lsa, Node> nodes = new HashMap<>();
+        // Now we are ready to commit the LSAs to the database.
+        try (Transaction tx = graphDb.beginTx()) {
+            // First, create the nodes in the graph.
+            for (Lsa lsa : lsdb) {
+                Node node = tx.createNode();
+                if (lsa instanceof RouterLsa) {
+                    RouterLsa routerLsa = (RouterLsa) lsa;
+                    node.addLabel(ROUTER);
+                    node.setProperty("routerId", routerLsa.routerId.getHostAddress());
+                    routerIds.put(routerLsa.routerId.getHostAddress(), routerLsa);
+                } else if (lsa instanceof NetworkLsa) {
+                    NetworkLsa networkLsa = (NetworkLsa) lsa;
+                    node.addLabel(NETWORK);
+                    final String prefix = networkLsa.prefix.getHostAddress() + "/" + networkLsa.prefixLength;
+                    node.setProperty("subnet", prefix);
+                    networks.put(prefix, networkLsa);
+                } else {
+                    throw new RuntimeException("Found an LSA of unexpected type: " + lsa);
+                }
+                nodes.put(lsa, node);
+            }
+
+            // Second, create the adjacencies between these nodes.
+            for (Lsa lsa: lsdb) {
+                if (lsa instanceof RouterLsa) {
+                    RouterLsa routerLsa = (RouterLsa) lsa;
+
+                    // Router-to-router (LSA Type 1/Type 1)
+                    routerLsa.getAdjacentRouters().forEach((addr, metric) -> {
+                        //System.out.println(routerLsa.routerId.getHostAddress() + " -> " + addr.getHostAddress());
+                        Relationship e = nodes.get(lsa).createRelationshipTo(
+                                nodes.get(routerIds.get(addr.getHostAddress())), RelTypes.LINKED
+                        );
+                        e.setProperty("cost", metric);
+                    });
+
+                    // Router-to-transit network (LSA Type 1/Type 2).
+                    // We have to get back from addresses to subnets on this.
+                    // The router LSA tells us our address and the DR address, but it does not tell us the prefix/mask.
+                    // So, we have to go find the prefix/mask of the network LSA associated with this transit network.
+                    routerLsa.getAdjacentNetworks().forEach((addr, metric) -> {
+                        //System.out.println(((RouterLsa) lsa).routerId.getHostAddress() + " -> " + addr);
+
+                        // We could get this perfect in a production environment, but in practice a linear search will
+                        // basically always be good enough. OSPF doesn't scale up to millions of routers, anyways.
+                        NetworkLsa peer = null;
+                        for (NetworkLsa networkLsa : networks.values()) {
+                            if (Arrays.equals(Lsa.getPrefixAddress(addr, networkLsa.mask).getAddress(), networkLsa.prefix.getAddress())) {
+                                //System.out.println("Found our subnet, it's " + networkLsa.getPrefix());
+                                peer = networkLsa;
+                                break;
+                            }
+                        }
+
+                        Relationship e = nodes.get(lsa).createRelationshipTo(
+                                nodes.get(peer), RelTypes.LINKED
+                        );
+                        e.setProperty("cost", metric);
+                    });
+                }
+            }
+
+            for (Lsa lsa : lsdb) {
+                if (lsa instanceof NetworkLsa) {
+                    NetworkLsa networkLsa = (NetworkLsa) lsa;
+                    //System.out.println(networkLsa.attachedRouters);
+                    networkLsa.attachedRouters.forEach(addr -> {
+                        //System.out.println(networkLsa.getPrefix() + " -> " + addr.getHostAddress());
+                        Node r = nodes.get(routerIds.get(addr.getHostAddress()));
+                        Relationship e1 = nodes.get(lsa).createRelationshipTo(r, RelTypes.LINKED);
+                        e1.setProperty("cost", 0);
+                    });
+                }
+            }
+
+            tx.commit();
+        }
 
         System.out.print("Press any key to exit...");
         System.in.read();
@@ -106,7 +189,7 @@ public class A3 {
         LINKED
     }
 
-    private static List<Lsa> snmpwalk() throws IOException {
+    private static List<Lsa> walkOspfLsdbMib() throws IOException {
         Mib mib = MibFactory.getInstance().newMib();
         mib.load("SNMPv2-MIB");
         mib.load("IF-MIB");
