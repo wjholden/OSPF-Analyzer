@@ -55,3 +55,12 @@ MATCH (v)-[e2:LINKED]->(u)
 WHERE e1.cost <> e2.cost AND id(u)<id(v)
 RETURN u.name, v.name, e1.cost, e2.cost
 ```
+
+### Mismatched transit network costs
+
+```
+MATCH (n:NETWORK)<-[e:LINKED]-(:ROUTER)
+WITH n.name as Network, collect(e) as Connections, stDev(e.cost) as s
+WHERE s <> 0
+return Network, Connections
+```
