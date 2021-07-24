@@ -8,7 +8,7 @@
 call gds.graph.create('myGraph', 'ROUTER', 'LINKED', {
     relationshipProperties: 'cost'
 })
-```0
+```
 
 ### PageRank
 
