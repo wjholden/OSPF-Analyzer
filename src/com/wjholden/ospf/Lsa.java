@@ -7,7 +7,10 @@ public abstract class Lsa {
     public final int length;
 
     public Lsa(byte[] lsa) {
-        length = (lsa[18] << 8) | lsa[19];
+
+        // Remember, Java's byte is signed so these can be negative.
+        length = bytesToUInt(lsa[18], lsa[19]);
+        assert(length > 0);
         assert(length == lsa.length);
     }
 
@@ -27,6 +30,10 @@ public abstract class Lsa {
             ex.printStackTrace();
             return null;
         }
+    }
+
+    public static int bytesToUInt(byte b1, byte b2) {
+        return (Byte.toUnsignedInt(b1) << 8) | Byte.toUnsignedInt(b2);
     }
 
     public static int getPrefixLength(InetAddress mask) {

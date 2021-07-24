@@ -1,17 +1,16 @@
-import com.wjholden.ospf.Lsa;
-import com.wjholden.ospf.NetworkLsa;
-import com.wjholden.ospf.RouterLsa;
+package com.wjholden.ospf;
+
 import org.neo4j.common.DependencyResolver;
 import org.neo4j.dbms.api.DatabaseManagementService;
 import org.neo4j.dbms.api.DatabaseManagementServiceBuilder;
 import org.neo4j.exceptions.KernelException;
-import org.neo4j.graphalgo.betweenness.BetweennessCentralityStreamProc;
-import org.neo4j.graphalgo.centrality.ClosenessCentralityProc;
-import org.neo4j.graphalgo.functions.AsNodeFunc;
-import org.neo4j.graphalgo.pagerank.PageRankStreamProc;
+import org.neo4j.graphalgo.BaseProc;
+import org.neo4j.graphalgo.functions.*;
 import org.neo4j.graphdb.*;
+import org.neo4j.gds.paths.*;
 import org.neo4j.kernel.api.procedure.GlobalProcedures;
 import org.neo4j.kernel.internal.GraphDatabaseAPI;
+import org.reflections.Reflections;
 import org.snmp4j.security.AuthSHA;
 import org.snmp4j.security.SecurityProtocols;
 import org.soulwing.snmp.*;
@@ -23,66 +22,26 @@ import java.util.*;
 
 import static org.neo4j.configuration.GraphDatabaseSettings.DEFAULT_DATABASE_NAME;
 
-public class A3 {
+public class OspfAnalyzer {
 
     private static final Label ROUTER = Label.label("ROUTER");
     private static final Label NETWORK = Label.label("NETWORK");
 
     public static void main (String args[]) throws IOException, KernelException {
-        final Path databaseDirectory = Files.createTempDirectory(DEFAULT_DATABASE_NAME);
-        System.out.println(databaseDirectory);
-
-        Map<String, String> settings = new HashMap<>();
-        settings.put("dbms.security.procedures.unrestricted", "jwt.security.*,gds.*,apoc.*");
-        settings.put("dbms.security.procedures.whitelist", "gds.*");
-        settings.put("dbms.connector.bolt.enabled", "true");
-        settings.put("dbms.connector.http.enabled", "true");
-
-        // Create the database
-        final DatabaseManagementService managementService = new DatabaseManagementServiceBuilder(databaseDirectory).
-                setConfigRaw(settings).
-                build();
-        // You will be able to connect to neo4j://localhost:7687/neo4j with blank username/blank password.
-        // This is not mentioned at https://neo4j.com/docs/java-reference/current/java-embedded/bolt/#java-embedded-bolt.
-        final GraphDatabaseService graphDb = managementService.database(DEFAULT_DATABASE_NAME);
-        registerShutdownHook(managementService);
+        // start the embedded Neo4j graph database. The database will write to an ephemeral temporary directory.
+        GraphDatabaseService graphDb = startDb();
 
         System.out.println("An embedded Neo4j graph database is running at: neo4j://localhost:7687/neo4j");
         System.out.println("Connect to the database with Neo4j Desktop.");
         System.out.println("Username = (blank)");
         System.out.println("Password = (blank)");
 
-        // See https://github.com/neo4j/graph-data-science/issues/91,
-        // "How to install Graph Data Science (GDS) library embedded in Java applications".
-        // The instructions from Mats-SX are extremely helpful.
-        GlobalProcedures proceduresRegistry = ((GraphDatabaseAPI) graphDb)
-                .getDependencyResolver()
-                .resolveDependency(GlobalProcedures.class, DependencyResolver.SelectionStrategy.SINGLE);
-        Class[] procsToRegister = {
-                PageRankStreamProc.class,
-                ClosenessCentralityProc.class,
-                BetweennessCentralityStreamProc.class
-        };
-
-        // Cannot use forEach with checked exceptions.
-        for (Class<?> procedureClass : procsToRegister) {
-            proceduresRegistry.registerProcedure(procedureClass);
-        }
-
-        // Functions are handled differently from procedures. This is for the gds.util.asNode function.
-        // This function will give the following error if not unrestricted:
-        //
-        // gds.util.asNode is unavailable because it is sandboxed and has dependencies outside of the sandbox.
-        // Sandboxing is controlled by the dbms.security.procedures.unrestricted setting.
-        // Only unrestrict procedures you can trust with access to database internals.
-        Class[] functionsToRegister = { AsNodeFunc.class };
-        for (Class f : functionsToRegister) {
-            proceduresRegistry.registerFunction(f);
-        }
+        // register the GDS procedures and functions (gds.util.asNode, Betweenness, Closeness, etc)
+        registerGds(graphDb);
 
         // Get the OSPFv2 LSAs out of a router using SNMP.
         List<Lsa> lsdb = walkOspfLsdbMib();
-        lsdb.forEach(System.out::println);
+        //lsdb.forEach(System.out::println);
 
         Map<String, RouterLsa> routerIds = new HashMap<>();
         Map<String, NetworkLsa> networks = new HashMap<>();
@@ -95,13 +54,13 @@ public class A3 {
                 if (lsa instanceof RouterLsa) {
                     RouterLsa routerLsa = (RouterLsa) lsa;
                     node.addLabel(ROUTER);
-                    node.setProperty("routerId", routerLsa.routerId.getHostAddress());
+                    node.setProperty("name", routerLsa.routerId.getHostAddress());
                     routerIds.put(routerLsa.routerId.getHostAddress(), routerLsa);
                 } else if (lsa instanceof NetworkLsa) {
                     NetworkLsa networkLsa = (NetworkLsa) lsa;
                     node.addLabel(NETWORK);
                     final String prefix = networkLsa.prefix.getHostAddress() + "/" + networkLsa.prefixLength;
-                    node.setProperty("subnet", prefix);
+                    node.setProperty("name", prefix);
                     networks.put(prefix, networkLsa);
                 } else {
                     throw new RuntimeException("Found an LSA of unexpected type: " + lsa);
@@ -204,7 +163,6 @@ public class A3 {
         target.setAuthPassphrase(System.getProperty("tnm4j.agent.auth.password", "cisco123"));
         target.setPrivPassphrase(System.getProperty("tnm4j.agent.priv.password", "cisco123"));
 
-
         List<Lsa> lsdb = new ArrayList<>();
         try (SnmpContext context = SnmpFactory.getInstance().newContext(target, mib)) {
             SnmpWalker<VarbindCollection> walker = context.walk(1, "sysName", "ospfLsdbAdvertisement");
@@ -218,5 +176,61 @@ public class A3 {
             }
         }
         return lsdb;
+    }
+
+    public static GraphDatabaseService startDb() throws IOException {
+        final Path databaseDirectory = Files.createTempDirectory(DEFAULT_DATABASE_NAME);
+
+        Map<String, String> settings = new HashMap<>();
+        settings.put("dbms.security.procedures.unrestricted", "jwt.security.*,gds.*,apoc.*");
+        settings.put("dbms.security.procedures.whitelist", "gds.*");
+        settings.put("dbms.connector.bolt.enabled", "true");
+        settings.put("dbms.connector.http.enabled", "true");
+
+        final DatabaseManagementService managementService = new DatabaseManagementServiceBuilder(databaseDirectory).
+                setConfigRaw(settings).
+                build();
+        // You will be able to connect to neo4j://localhost:7687/neo4j with blank username/blank password.
+        // This is not mentioned at https://neo4j.com/docs/java-reference/current/java-embedded/bolt/#java-embedded-bolt.
+        final GraphDatabaseService graphDb = managementService.database(DEFAULT_DATABASE_NAME);
+        registerShutdownHook(managementService);
+
+        return graphDb;
+    }
+
+    public static GraphDatabaseService registerGds(GraphDatabaseService graphDb) throws KernelException {
+        // See https://github.com/neo4j/graph-data-science/issues/91,
+        // "How to install Graph Data Science (GDS) library embedded in Java applications".
+        // The instructions from Mats-SX are extremely helpful.
+        GlobalProcedures proceduresRegistry = ((GraphDatabaseAPI) graphDb)
+                .getDependencyResolver()
+                .resolveDependency(GlobalProcedures.class, DependencyResolver.SelectionStrategy.SINGLE);
+
+        // Get a list of all procedures (classes that extend BaseProc) and register them in our graph database.
+        // This is stuff like gds.betweenness.stream and gds.pageRank.write.
+        Set<Class<? extends BaseProc>> procedures = new Reflections("org.neo4j.graphalgo").getSubTypesOf(BaseProc.class);
+        procedures.addAll(new Reflections("org.neo4j.gds.embeddings").getSubTypesOf(BaseProc.class));
+        procedures.addAll(new Reflections("org.neo4j.gds.paths").getSubTypesOf(BaseProc.class));
+
+        // Cannot use forEach with checked exceptions.
+        for (Class<? extends BaseProc> procedureClass : procedures) {
+            proceduresRegistry.registerProcedure(procedureClass);
+        }
+
+        //System.out.println("Loaded the following GDS procedures: " + procedures);
+
+        // Functions are handled differently from procedures. This is for the gds.util.asNode function.
+        // This function will give the following error if not unrestricted:
+        //
+        // gds.util.asNode is unavailable because it is sandboxed and has dependencies outside of the sandbox.
+        // Sandboxing is controlled by the dbms.security.procedures.unrestricted setting.
+        // Only unrestrict procedures you can trust with access to database internals.
+        Class[] functionsToRegister = { AsNodeFunc.class, NodePropertyFunc.class, VersionFunc.class };
+
+        for (Class f : functionsToRegister) {
+            proceduresRegistry.registerFunction(f);
+        }
+
+        return graphDb;
     }
 }

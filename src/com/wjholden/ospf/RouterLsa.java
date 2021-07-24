@@ -16,8 +16,8 @@ public class RouterLsa extends Lsa {
 
         routerId = InetAddress.getByAddress(Arrays.copyOfRange(lsa, 4, 8));
 
-        final int links = (lsa[22] << 8) | lsa[23];
-        this.links = links;
+        links = bytesToUInt(lsa[22], lsa[23]);
+        assert(links >= 0);
 
         final int base = 6 * 4;
         for (int i = 0 ; i < links ; i++) {
@@ -25,9 +25,11 @@ public class RouterLsa extends Lsa {
             Link link = new Link();
             link.linkId = InetAddress.getByAddress(Arrays.copyOfRange(lsa, base + offset, base + offset + 4));
             link.linkData = InetAddress.getByAddress(Arrays.copyOfRange(lsa, base + offset + 4, base + offset + 8));
-            link.type = lsa[base + offset + 8];
-            link.tos = lsa[base + offset + 9];
-            link.metric = (lsa[base + offset + 10] << 8) | lsa[base + offset + 11];
+            link.type = Byte.toUnsignedInt(lsa[base + offset + 8]);
+            link.tos = Byte.toUnsignedInt(lsa[base + offset + 9]);
+            link.metric = bytesToUInt(lsa[base + offset + 10], lsa[base + offset + 11]);
+            assert(link.metric > 0);
+            assert(link.metric <= 65535);
             adjacencies.add(link);
         }
     }
