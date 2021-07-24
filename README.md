@@ -10,6 +10,21 @@ call gds.graph.create('myGraph', 'ROUTER', 'LINKED', {
 })
 ```
 
+### PageRank
+
+I can only get `relationshipWeightProperty` to work for weighted PageRank by first creating the in-memory graph.
+
+```
+CALL gds.pageRank.stream('myGraph', {
+    maxIterations: 20,
+    dampingFactor: 0.85,
+    relationshipWeightProperty: 'cost'
+})
+YIELD nodeId, score
+RETURN gds.util.asNode(nodeId).routerId as routerId, score
+ORDER BY score DESC
+```
+
 ### Yen
 
 ```
