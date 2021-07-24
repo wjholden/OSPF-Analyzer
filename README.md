@@ -2,6 +2,14 @@
 
 ## Queries
 
+### In-Memory Graph
+
+```
+call gds.graph.create('myGraph', 'ROUTER', 'LINKED', {
+    relationshipProperties: 'cost'
+})
+```
+
 ### Yen
 
 ```
