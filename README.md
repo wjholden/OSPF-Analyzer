@@ -46,3 +46,12 @@ CALL gds.shortestPath.yens.stream({
 YIELD index, nodeIds, totalCost
 RETURN [nodeId IN nodeIds | gds.util.asNode(nodeId).name] AS names, totalCost
 ```
+
+### Mismatched point-to-point costs
+
+```
+MATCH (u:ROUTER)-[e1:LINKED]->(v:ROUTER)
+MATCH (v)-[e2:LINKED]->(u)
+WHERE e1.cost <> e2.cost AND id(u)<id(v)
+RETURN u.name, v.name, e1.cost, e2.cost
+```
