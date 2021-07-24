@@ -25,6 +25,18 @@ RETURN gds.util.asNode(nodeId).name as routerId, score
 ORDER BY score DESC
 ```
 
+### Betweenness
+
+```
+CALL gds.betweenness.stream({
+    nodeProjection: "ROUTER",
+    relationshipProjection: "LINKED"
+})
+YIELD nodeId, score
+RETURN gds.util.asNode(nodeId).name as Name, score as `Betweenness Score`
+ORDER BY score DESC
+```
+
 ### Yen
 
 ```
