@@ -8,7 +8,7 @@
 call gds.graph.create('myGraph', 'ROUTER', 'LINKED', {
     relationshipProperties: 'cost'
 })
-```
+```0
 
 ### PageRank
 
@@ -21,15 +21,15 @@ CALL gds.pageRank.stream('myGraph', {
     relationshipWeightProperty: 'cost'
 })
 YIELD nodeId, score
-RETURN gds.util.asNode(nodeId).routerId as routerId, score
+RETURN gds.util.asNode(nodeId).name as routerId, score
 ORDER BY score DESC
 ```
 
 ### Yen
 
 ```
-match (u:ROUTER {routerId: "10.25.26.26"}),
-    (v:ROUTER {routerId: "10.16.18.18"})
+MATCH (u:ROUTER {name: "10.25.26.26"}),
+    (v:ROUTER {name: "10.16.18.18"})
 CALL gds.shortestPath.yens.stream({
     sourceNode: u,
     targetNode: v,
@@ -43,6 +43,6 @@ CALL gds.shortestPath.yens.stream({
     relationshipWeightProperty: "cost",
     k: 5
 })
-YIELD index, nodeIds, costs
-RETURN nodeIds, costs
+YIELD index, nodeIds, totalCost
+RETURN [nodeId IN nodeIds | gds.util.asNode(nodeId).name] AS names, totalCost
 ```
