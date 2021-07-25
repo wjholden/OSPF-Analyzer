@@ -97,4 +97,15 @@ public class RouterLsa extends Lsa {
         }
         return net;
     }
+
+    public Map<String, Integer> getStubs() {
+        Map<String, Integer> stubs = new HashMap<>();
+        for (Link link : adjacencies) {
+            if (link.type == 3) {
+                String name = link.linkId.getHostAddress() + "/" + getPrefixLength(link.linkData);
+                stubs.put(name, link.metric);
+            }
+        }
+        return stubs;
+    }
 }

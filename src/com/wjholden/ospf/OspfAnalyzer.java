@@ -26,6 +26,10 @@ public class OspfAnalyzer {
 
     private static final Label ROUTER = Label.label("ROUTER");
     private static final Label NETWORK = Label.label("NETWORK");
+    private static final Label STUB = Label.label("STUB");
+    private static final String[] CONSTRAINTS = {
+            "CREATE CONSTRAINT IF NOT EXISTS ON (r:ROUTER) ASSERT r.name IS UNIQUE"
+    };
 
     public static void main (String args[]) throws IOException, KernelException {
         // start the embedded Neo4j graph database. The database will write to an ephemeral temporary directory.
@@ -38,6 +42,22 @@ public class OspfAnalyzer {
 
         // register the GDS procedures and functions (gds.util.asNode, Betweenness, Closeness, etc)
         registerGds(graphDb);
+
+        // Define one constraint using a raw Cypher query.
+        // See https://neo4j.com/docs/java-reference/current/java-embedded/cypher-java/ for official documentation.
+        try (Transaction tx = graphDb.beginTx()) {
+            for (String constraint : CONSTRAINTS) {
+                Result result = tx.execute(constraint);
+                // CREATE CONSTRAINT should not return any output.
+                while (result.hasNext()) {
+                    Map<String, Object> row = result.next();
+                    for (Map.Entry<String, Object> column : row.entrySet()) {
+                        System.out.println(column);
+                    }
+                }
+            }
+            tx.commit();
+        }
 
         // Get the OSPFv2 LSAs out of a router using SNMP.
         List<Lsa> lsdb = walkOspfLsdbMib();
@@ -100,10 +120,29 @@ public class OspfAnalyzer {
                             }
                         }
 
-                        Relationship e = nodes.get(lsa).createRelationshipTo(
-                                nodes.get(peer), RelTypes.LINKED
-                        );
-                        e.setProperty("cost", metric);
+                        // If the network types are mismatched, then the router that thinks it is in a broadcast network
+                        // will (incorrectly) assume that the other router (the P2P router) is the DR.
+                        // The broadcast router will therefore assume that the P2P router is originating a type 2 (network)
+                        // LSA. The above search will fail, and "peer" will be null.
+                        if (peer != null) {
+                            Relationship e = nodes.get(lsa).createRelationshipTo(
+                                    nodes.get(peer), RelTypes.LINKED
+                            );
+                            e.setProperty("cost", metric);
+                        } else {
+                            // Searching for the network LSA failed, which could mean there is a P2P/broadcast mismatch.
+                            //System.err.println("There may be a P2P/broadcast mismatch at " + ((RouterLsa) lsa).routerId.getHostAddress());
+                        }
+                    });
+
+                    // Finally, the stub networks attached to routers.
+                    // It is possible for two different routers to originate the same stub route.
+                    // This will appear in the graph database as two different vertices with the same name.
+                    routerLsa.getStubs().forEach((name, metric) -> {
+                        Node stub = tx.createNode(STUB);
+                        stub.setProperty("name", name);
+                        Relationship e1 = nodes.get(lsa).createRelationshipTo(stub, RelTypes.LINKED);
+                        e1.setProperty("cost", metric);
                     });
                 }
             }
