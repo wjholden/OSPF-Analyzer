@@ -188,13 +188,12 @@ public class OspfAnalyzer {
     }
 
     private static List<Lsa> walkOspfLsdbMib() throws IOException {
-        Mib mib = MibFactory.getInstance().newMib();
+        final Mib mib = MibFactory.getInstance().newMib();
         mib.load("SNMPv2-MIB");
-        mib.load("IF-MIB");
         mib.load("OSPF-MIB");
 
         SecurityProtocols.getInstance().addAuthenticationProtocol(new AuthSHA());
-        SimpleSnmpV3Target target = new SimpleSnmpV3Target();
+        final SimpleSnmpV3Target target = new SimpleSnmpV3Target();
         target.setAddress("192.168.0.1");
         target.setSecurityName("admin");
         target.setAuthType(SnmpV3Target.AuthType.SHA);
@@ -202,15 +201,14 @@ public class OspfAnalyzer {
         target.setAuthPassphrase(System.getProperty("tnm4j.agent.auth.password", "cisco123"));
         target.setPrivPassphrase(System.getProperty("tnm4j.agent.priv.password", "cisco123"));
 
-        List<Lsa> lsdb = new ArrayList<>();
+        final List<Lsa> lsdb = new ArrayList<>();
         try (SnmpContext context = SnmpFactory.getInstance().newContext(target, mib)) {
-            SnmpWalker<VarbindCollection> walker = context.walk(1, "sysName", "ospfLsdbAdvertisement");
+            final SnmpWalker<VarbindCollection> walker = context.walk(1, "sysName", "ospfLsdbAdvertisement");
 
             VarbindCollection row = walker.next().get();
             while (row != null) {
-                byte[] lsa = (byte[]) row.get("ospfLsdbAdvertisement").toObject();
+                final byte[] lsa = (byte[]) row.get("ospfLsdbAdvertisement").toObject();
                 lsdb.add(Lsa.getInstance(lsa));
-                //System.out.println(Lsa.getInstance(lsa));
                 row = walker.next().get();
             }
         }
