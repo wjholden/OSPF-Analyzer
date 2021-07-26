@@ -5,9 +5,10 @@ import org.neo4j.dbms.api.DatabaseManagementService;
 import org.neo4j.dbms.api.DatabaseManagementServiceBuilder;
 import org.neo4j.exceptions.KernelException;
 import org.neo4j.graphalgo.BaseProc;
-import org.neo4j.graphalgo.functions.*;
+import org.neo4j.graphalgo.functions.AsNodeFunc;
+import org.neo4j.graphalgo.functions.NodePropertyFunc;
+import org.neo4j.graphalgo.functions.VersionFunc;
 import org.neo4j.graphdb.*;
-import org.neo4j.gds.paths.*;
 import org.neo4j.kernel.api.procedure.GlobalProcedures;
 import org.neo4j.kernel.internal.GraphDatabaseAPI;
 import org.reflections.Reflections;
@@ -19,6 +20,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.stream.Collectors;
 
 import static org.neo4j.configuration.GraphDatabaseSettings.DEFAULT_DATABASE_NAME;
 
@@ -28,7 +30,9 @@ public class OspfAnalyzer {
     private static final Label NETWORK = Label.label("NETWORK");
     private static final Label STUB = Label.label("STUB");
     private static final String[] CONSTRAINTS = {
-            "CREATE CONSTRAINT IF NOT EXISTS ON (r:ROUTER) ASSERT r.name IS UNIQUE"
+            "CREATE CONSTRAINT IF NOT EXISTS ON (r:ROUTER) ASSERT r.name IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS ON (n:NETWORK) ASSERT n.name IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS ON (s:STUB) ASSERT s.name IS UNIQUE"
     };
 
     public static void main (String args[]) throws IOException, KernelException {
@@ -60,112 +64,150 @@ public class OspfAnalyzer {
         }
 
         // Get the OSPFv2 LSAs out of a router using SNMP.
-        List<Lsa> lsdb = walkOspfLsdbMib();
-        //lsdb.forEach(System.out::println);
+        final List<Lsa> lsdb = walkOspfLsdbMib();
 
-        Map<String, RouterLsa> routerIds = new HashMap<>();
-        Map<String, NetworkLsa> networks = new HashMap<>();
-        Map<Lsa, Node> nodes = new HashMap<>();
-        // Now we are ready to commit the LSAs to the database.
-        try (Transaction tx = graphDb.beginTx()) {
-            // First, create the nodes in the graph.
-            for (Lsa lsa : lsdb) {
-                Node node = tx.createNode();
-                if (lsa instanceof RouterLsa) {
-                    RouterLsa routerLsa = (RouterLsa) lsa;
-                    node.addLabel(ROUTER);
-                    node.setProperty("name", routerLsa.routerId.getHostAddress());
-                    routerIds.put(routerLsa.routerId.getHostAddress(), routerLsa);
-                } else if (lsa instanceof NetworkLsa) {
-                    NetworkLsa networkLsa = (NetworkLsa) lsa;
-                    node.addLabel(NETWORK);
-                    final String prefix = networkLsa.prefix.getHostAddress() + "/" + networkLsa.prefixLength;
-                    node.setProperty("name", prefix);
-                    networks.put(prefix, networkLsa);
-                } else {
-                    throw new RuntimeException("Found an LSA of unexpected type: " + lsa);
-                }
-                nodes.put(lsa, node);
-            }
+        final List<RouterLsa> routers = lsdb.stream().filter(l -> l instanceof RouterLsa).map(l -> (RouterLsa) l).collect(Collectors.toList());
+        final List<NetworkLsa> networks = lsdb.stream().filter(l -> l instanceof NetworkLsa).map(l -> (NetworkLsa) l).collect(Collectors.toList());
 
-            // Second, create the adjacencies between these nodes.
-            for (Lsa lsa: lsdb) {
-                if (lsa instanceof RouterLsa) {
-                    RouterLsa routerLsa = (RouterLsa) lsa;
-
-                    // Router-to-router (LSA Type 1/Type 1)
-                    routerLsa.getAdjacentRouters().forEach((addr, metric) -> {
-                        //System.out.println(routerLsa.routerId.getHostAddress() + " -> " + addr.getHostAddress());
-                        Relationship e = nodes.get(lsa).createRelationshipTo(
-                                nodes.get(routerIds.get(addr.getHostAddress())), RelTypes.LINKED
-                        );
-                        e.setProperty("cost", metric);
-                    });
-
-                    // Router-to-transit network (LSA Type 1/Type 2).
-                    // We have to get back from addresses to subnets on this.
-                    // The router LSA tells us our address and the DR address, but it does not tell us the prefix/mask.
-                    // So, we have to go find the prefix/mask of the network LSA associated with this transit network.
-                    routerLsa.getAdjacentNetworks().forEach((addr, metric) -> {
-                        //System.out.println(((RouterLsa) lsa).routerId.getHostAddress() + " -> " + addr);
-
-                        // We could get this perfect in a production environment, but in practice a linear search will
-                        // basically always be good enough. OSPF doesn't scale up to millions of routers, anyways.
-                        NetworkLsa peer = null;
-                        for (NetworkLsa networkLsa : networks.values()) {
-                            if (Arrays.equals(Lsa.getPrefixAddress(addr, networkLsa.mask).getAddress(), networkLsa.prefix.getAddress())) {
-                                //System.out.println("Found our subnet, it's " + networkLsa.getPrefix());
-                                peer = networkLsa;
-                                break;
-                            }
-                        }
-
-                        // If the network types are mismatched, then the router that thinks it is in a broadcast network
-                        // will (incorrectly) assume that the other router (the P2P router) is the DR.
-                        // The broadcast router will therefore assume that the P2P router is originating a type 2 (network)
-                        // LSA. The above search will fail, and "peer" will be null.
-                        if (peer != null) {
-                            Relationship e = nodes.get(lsa).createRelationshipTo(
-                                    nodes.get(peer), RelTypes.LINKED
-                            );
-                            e.setProperty("cost", metric);
-                        } else {
-                            // Searching for the network LSA failed, which could mean there is a P2P/broadcast mismatch.
-                            //System.err.println("There may be a P2P/broadcast mismatch at " + ((RouterLsa) lsa).routerId.getHostAddress());
-                        }
-                    });
-
-                    // Finally, the stub networks attached to routers.
-                    // It is possible for two different routers to originate the same stub route.
-                    // This will appear in the graph database as two different vertices with the same name.
-                    routerLsa.getStubs().forEach((name, metric) -> {
-                        Node stub = tx.createNode(STUB);
-                        stub.setProperty("name", name);
-                        Relationship e1 = nodes.get(lsa).createRelationshipTo(stub, RelTypes.LINKED);
-                        e1.setProperty("cost", metric);
-                    });
-                }
-            }
-
-            for (Lsa lsa : lsdb) {
-                if (lsa instanceof NetworkLsa) {
-                    NetworkLsa networkLsa = (NetworkLsa) lsa;
-                    //System.out.println(networkLsa.attachedRouters);
-                    networkLsa.attachedRouters.forEach(addr -> {
-                        //System.out.println(networkLsa.getPrefix() + " -> " + addr.getHostAddress());
-                        Node r = nodes.get(routerIds.get(addr.getHostAddress()));
-                        Relationship e1 = nodes.get(lsa).createRelationshipTo(r, RelTypes.LINKED);
-                        e1.setProperty("cost", 0);
-                    });
-                }
-            }
-
-            tx.commit();
-        }
+        createRouters(graphDb, routers);
+        createNetworks(graphDb, networks);
+        connectRouters(graphDb, routers);
+        connectNetworks(graphDb, networks);
+        connectTransport(graphDb, routers, networks);
+        connectStubs(graphDb, routers);
 
         System.out.print("Press any key to exit...");
         System.in.read();
         System.exit(0);
+    }
+
+    private static void createRouters(GraphDatabaseService graphDb, Collection<RouterLsa> routers) {
+        try (Transaction tx = graphDb.beginTx()) {
+            routers.forEach(lsa -> {
+                Node node = tx.createNode();
+                node.addLabel(ROUTER);
+                node.setProperty("name", lsa.routerId.getHostAddress());
+            });
+            tx.commit();
+        }
+    }
+
+    private static void createNetworks(GraphDatabaseService graphDb, Collection<NetworkLsa> networks) {
+        try (Transaction tx = graphDb.beginTx()) {
+            networks.forEach(lsa -> {
+                Node node = tx.createNode();
+                node.addLabel(NETWORK);
+                final String prefix = lsa.getPrefix();
+                node.setProperty("name", prefix);
+            });
+            tx.commit();
+        }
+    }
+
+    private static void connectRouters(GraphDatabaseService graphDb, Collection<RouterLsa> routers) {
+        String queryString = "MATCH (src:ROUTER {name:$src})\n" +
+                "MATCH (dst:ROUTER {name:$dst})\n" +
+                "MERGE (src)-[:LINKED {cost:$cost}]->(dst)";
+        try (Transaction tx = graphDb.beginTx()) {
+            routers.forEach(src -> {
+                src.getAdjacentRouters().forEach((dst, metric) -> {
+                    Map<String, Object> parameters = new HashMap<>();
+                    parameters.put("src", src.routerId.getHostAddress());
+                    parameters.put("dst", dst.getHostAddress());
+                    parameters.put("cost", metric);
+                    tx.execute(queryString, parameters);
+                });
+            });
+            tx.commit();
+        }
+    }
+
+    private static void connectNetworks(GraphDatabaseService graphDb, Collection<NetworkLsa> networks) {
+        String queryString = "MATCH (src:NETWORK {name:$src})\n" +
+                "MATCH (dst:ROUTER {name:$dst})\n" +
+                "MERGE (src)-[:LINKED {cost:$cost}]->(dst)";
+        try (Transaction tx = graphDb.beginTx()) {
+            networks.forEach(src -> {
+                src.attachedRouters.forEach(dst -> {
+                    Map<String, Object> parameters = new HashMap<>();
+                    parameters.put("src", src.getPrefix());
+                    parameters.put("dst", dst.getHostAddress());
+                    parameters.put("cost", 0);
+                    tx.execute(queryString, parameters);
+                });
+            });
+            tx.commit();
+        }
+    }
+
+    private static void connectTransport(GraphDatabaseService graphDb, Collection<RouterLsa> routers, Collection<NetworkLsa> networks) {
+        String queryString = "MATCH (src:ROUTER {name:$src})\n" +
+                "MATCH (dst:NETWORK {name:$dst})\n" +
+                "MERGE (src)-[:LINKED {cost:$cost}]->(dst)";
+        try (Transaction tx = graphDb.beginTx()) {
+            routers.forEach(src -> {
+                src.getAdjacentNetworks().forEach((dr, metric) -> {
+                    // The router only knows the IP address of the designated router (DR).
+                    // We have to search among our network LSA's for the correct network LSA that the DR creates.
+                    // Only the DR generates the network LSA, and only the network LSA specifies the subnet mask.
+                    // We'll do this with a linear search, knowing that a trie could do it faster for large networks.
+                    // The linear search can fail under unusual circumstances where there is no type 2 LSA due to a
+                    // network type mismatch or DR election problem.
+                    String dst = null;
+                    Iterator<NetworkLsa> iterator = networks.iterator();
+
+                    while (iterator.hasNext() && dst == null) {
+                        NetworkLsa networkLsa = iterator.next();
+                        if (Arrays.equals(Lsa.getPrefixAddress(dr, networkLsa.mask).getAddress(), networkLsa.prefix.getAddress())) {
+                            dst = networkLsa.getPrefix();
+                        }
+                    }
+
+                    if (dst != null) {
+                        Map<String, Object> parameters = new HashMap<>();
+                        parameters.put("src", src.routerId.getHostAddress());
+                        parameters.put("dst", dst);
+                        parameters.put("cost", metric);
+                        tx.execute(queryString, parameters);
+                    } else {
+                        System.err.println("Did not find a network LSA for " + dr.getHostAddress());
+                    }
+                });
+            });
+
+
+            networks.forEach(src -> {
+                src.attachedRouters.forEach(dst -> {
+                    Map<String, Object> parameters = new HashMap<>();
+                    parameters.put("src", src.getPrefix());
+                    parameters.put("dst", dst.getHostAddress());
+                    parameters.put("cost", 0);
+                    tx.execute(queryString, parameters);
+                });
+            });
+            tx.commit();
+        }
+    }
+
+    private static void connectStubs(GraphDatabaseService graphDb, Collection<RouterLsa> routers) {
+        // The router definitely exists.
+        // The stub may or may not exist.
+        // So, one match and two merges.
+        String queryString = "MATCH (src:ROUTER {name:$src})\n" +
+                "MERGE (dst:STUB {name:$dst})\n" +
+                "MERGE (src)-[:LINKED {cost:$cost}]->(dst)";
+        try (Transaction tx = graphDb.beginTx()) {
+            routers.forEach(src -> {
+                src.getStubs().forEach((dst, metric) -> {
+                    Map<String, Object> parameters = new HashMap<>();
+                    parameters.put("src", src.routerId.getHostAddress());
+                    parameters.put("dst", dst);
+                    parameters.put("cost", metric);
+                    tx.execute(queryString, parameters);
+                });
+            });
+            tx.commit();
+        }
     }
 
     private static void registerShutdownHook( final DatabaseManagementService managementService )
