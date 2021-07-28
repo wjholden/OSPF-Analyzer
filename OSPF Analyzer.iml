@@ -12,5 +12,10 @@
     <orderEntry type="library" name="org.neo4j.gds:core:1.6.3" level="project" />
     <orderEntry type="library" name="org.neo4j.gds:proc:1.6.3" level="project" />
     <orderEntry type="library" name="org.reflections:reflections:0.9.12" level="project" />
+    <orderEntry type="library" name="reflections" level="application" />
+    <orderEntry type="library" name="neo4j.gds.core" level="application" />
+    <orderEntry type="library" name="neo4j" level="application" />
+    <orderEntry type="library" name="neo4j.gds.proc" level="application" />
+    <orderEntry type="library" name="soulwing.snmp.tnm4j" level="application" />
   </component>
 </module>
