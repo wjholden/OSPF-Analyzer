@@ -35,7 +35,7 @@ public class OspfAnalyzer {
             "CREATE CONSTRAINT IF NOT EXISTS ON (s:STUB) ASSERT s.name IS UNIQUE"
     };
 
-    public static void main (String args[]) throws IOException, KernelException {
+    public static void main(String args[]) throws IOException, KernelException {
         // start the embedded Neo4j graph database. The database will write to an ephemeral temporary directory.
         GraphDatabaseService graphDb = startDb();
 
@@ -47,27 +47,19 @@ public class OspfAnalyzer {
         // register the GDS procedures and functions (gds.util.asNode, Betweenness, Closeness, etc)
         registerGds(graphDb);
 
-        // Define one constraint using a raw Cypher query.
-        // See https://neo4j.com/docs/java-reference/current/java-embedded/cypher-java/ for official documentation.
-        try (Transaction tx = graphDb.beginTx()) {
-            for (String constraint : CONSTRAINTS) {
-                Result result = tx.execute(constraint);
-                // CREATE CONSTRAINT should not return any output.
-                while (result.hasNext()) {
-                    Map<String, Object> row = result.next();
-                    for (Map.Entry<String, Object> column : row.entrySet()) {
-                        System.out.println(column);
-                    }
-                }
-            }
-            tx.commit();
-        }
+        defineConstraints(graphDb);
 
-        // Get the OSPFv2 LSAs out of a router using SNMP.
-        final List<Lsa> lsdb = walkOspfLsdbMib();
+        // Get the OSPFv2 LSAs out of a router- using SNMP.
+        final List<Lsa> lsdb = walkOspfLsdbMib(args[0], args[1], args[2], args[3]);
 
-        final List<RouterLsa> routers = lsdb.stream().filter(l -> l instanceof RouterLsa).map(l -> (RouterLsa) l).collect(Collectors.toList());
-        final List<NetworkLsa> networks = lsdb.stream().filter(l -> l instanceof NetworkLsa).map(l -> (NetworkLsa) l).collect(Collectors.toList());
+        final List<RouterLsa> routers = lsdb.stream()
+                .filter(l -> l instanceof RouterLsa)
+                .map(l -> (RouterLsa) l)
+                .collect(Collectors.toList());
+        final List<NetworkLsa> networks = lsdb.stream().
+                filter(l -> l instanceof NetworkLsa)
+                .map(l -> (NetworkLsa) l)
+                .collect(Collectors.toList());
 
         createRouters(graphDb, routers);
         createNetworks(graphDb, networks);
@@ -81,6 +73,14 @@ public class OspfAnalyzer {
         System.exit(0);
     }
 
+    private static void defineConstraints(GraphDatabaseService graphDb) {
+        // See https://neo4j.com/docs/java-reference/current/java-embedded/cypher-java/ for official documentation.
+        try (Transaction tx = graphDb.beginTx()) {
+            Arrays.asList(CONSTRAINTS).forEach(c -> tx.execute(c));
+            tx.commit();
+        }
+    }
+
     private static void createRouters(GraphDatabaseService graphDb, Collection<RouterLsa> routers) {
         try (Transaction tx = graphDb.beginTx()) {
             routers.forEach(lsa -> {
@@ -92,7 +92,8 @@ public class OspfAnalyzer {
         }
     }
 
-    private static void createNetworks(GraphDatabaseService graphDb, Collection<NetworkLsa> networks) {
+    private static void createNetworks(GraphDatabaseService graphDb,
+                                       Collection<NetworkLsa> networks) {
         try (Transaction tx = graphDb.beginTx()) {
             networks.forEach(lsa -> {
                 Node node = tx.createNode();
@@ -104,7 +105,8 @@ public class OspfAnalyzer {
         }
     }
 
-    private static void connectRouters(GraphDatabaseService graphDb, Collection<RouterLsa> routers) {
+    private static void connectRouters(GraphDatabaseService graphDb,
+                                       Collection<RouterLsa> routers) {
         String queryString = "MATCH (src:ROUTER {name:$src})\n" +
                 "MATCH (dst:ROUTER {name:$dst})\n" +
                 "MERGE (src)-[:LINKED {cost:$cost}]->(dst)";
@@ -189,7 +191,8 @@ public class OspfAnalyzer {
         }
     }
 
-    private static void connectStubs(GraphDatabaseService graphDb, Collection<RouterLsa> routers) {
+    private static void connectStubs(GraphDatabaseService graphDb,
+                                     Collection<RouterLsa> routers) {
         // The router definitely exists.
         // The stub may or may not exist.
         // So, one match and two merges.
@@ -210,43 +213,41 @@ public class OspfAnalyzer {
         }
     }
 
-    private static void registerShutdownHook( final DatabaseManagementService managementService )
-    {
+    private static void registerShutdownHook(final DatabaseManagementService managementService) {
         // Registers a shutdown hook for the Neo4j instance so that it
         // shuts down nicely when the VM exits (even if you "Ctrl-C" the
         // running application).
-        Runtime.getRuntime().addShutdownHook( new Thread()
-        {
+        Runtime.getRuntime().addShutdownHook(new Thread() {
             @Override
-            public void run()
-            {
+            public void run() {
                 managementService.shutdown();
             }
-        } );
+        });
     }
 
     private enum RelTypes implements RelationshipType {
         LINKED
     }
 
-    private static List<Lsa> walkOspfLsdbMib() throws IOException {
+    private static List<Lsa> walkOspfLsdbMib(String address, String username, String authPassword,
+                                             String privPassword) throws IOException {
         final Mib mib = MibFactory.getInstance().newMib();
         mib.load("SNMPv2-MIB");
         mib.load("OSPF-MIB");
 
         SecurityProtocols.getInstance().addAuthenticationProtocol(new AuthSHA());
         final SimpleSnmpV3Target target = new SimpleSnmpV3Target();
-        target.setAddress("192.168.0.1");
-        target.setSecurityName("admin");
+        target.setAddress(address);
+        target.setSecurityName(username);
         target.setAuthType(SnmpV3Target.AuthType.SHA);
         target.setPrivType(SnmpV3Target.PrivType.AES128);
-        target.setAuthPassphrase(System.getProperty("tnm4j.agent.auth.password", "cisco123"));
-        target.setPrivPassphrase(System.getProperty("tnm4j.agent.priv.password", "cisco123"));
+        target.setAuthPassphrase(System.getProperty("tnm4j.agent.auth.password", authPassword));
+        target.setPrivPassphrase(System.getProperty("tnm4j.agent.priv.password", privPassword));
 
         final List<Lsa> lsdb = new ArrayList<>();
         try (SnmpContext context = SnmpFactory.getInstance().newContext(target, mib)) {
-            final SnmpWalker<VarbindCollection> walker = context.walk(1, "sysName", "ospfLsdbAdvertisement");
-
+            final SnmpWalker<VarbindCollection> walker = context.walk(1, "sysName",
+                    "ospfLsdbAdvertisement");
             VarbindCollection row = walker.next().get();
             while (row != null) {
                 final byte[] lsa = (byte[]) row.get("ospfLsdbAdvertisement").toObject();
@@ -266,7 +267,8 @@ public class OspfAnalyzer {
         settings.put("dbms.connector.bolt.enabled", "true");
         settings.put("dbms.connector.http.enabled", "true");
 
-        final DatabaseManagementService managementService = new DatabaseManagementServiceBuilder(databaseDirectory).
+        final DatabaseManagementService managementService = new DatabaseManagementServiceBuilder(
+                databaseDirectory).
                 setConfigRaw(settings).
                 build();
         // You will be able to connect to neo4j://localhost:7687/neo4j with blank username/blank password.
@@ -277,17 +279,19 @@ public class OspfAnalyzer {
         return graphDb;
     }
 
-    public static GraphDatabaseService registerGds(GraphDatabaseService graphDb) throws KernelException {
+    public static GraphDatabaseService registerGds(GraphDatabaseService graphDb)
+            throws KernelException {
         // See https://github.com/neo4j/graph-data-science/issues/91,
         // "How to install Graph Data Science (GDS) library embedded in Java applications".
         // The instructions from Mats-SX are extremely helpful.
-        GlobalProcedures proceduresRegistry = ((GraphDatabaseAPI) graphDb)
-                .getDependencyResolver()
-                .resolveDependency(GlobalProcedures.class, DependencyResolver.SelectionStrategy.SINGLE);
+        final GlobalProcedures proceduresRegistry = ((GraphDatabaseAPI) graphDb)
+                .getDependencyResolver().resolveDependency(GlobalProcedures.class,
+                        DependencyResolver.SelectionStrategy.SINGLE);
 
         // Get a list of all procedures (classes that extend BaseProc) and register them in our graph database.
         // This is stuff like gds.betweenness.stream and gds.pageRank.write.
-        Set<Class<? extends BaseProc>> procedures = new Reflections("org.neo4j.graphalgo").getSubTypesOf(BaseProc.class);
+        final Set<Class<? extends BaseProc>> procedures = new Reflections("org.neo4j.graphalgo").
+                getSubTypesOf(BaseProc.class);
         procedures.addAll(new Reflections("org.neo4j.gds.embeddings").getSubTypesOf(BaseProc.class));
         procedures.addAll(new Reflections("org.neo4j.gds.paths").getSubTypesOf(BaseProc.class));
 
@@ -304,7 +308,10 @@ public class OspfAnalyzer {
         // gds.util.asNode is unavailable because it is sandboxed and has dependencies outside of the sandbox.
         // Sandboxing is controlled by the dbms.security.procedures.unrestricted setting.
         // Only unrestrict procedures you can trust with access to database internals.
-        Class[] functionsToRegister = { AsNodeFunc.class, NodePropertyFunc.class, VersionFunc.class };
+        final Class[] functionsToRegister = {
+                AsNodeFunc.class,
+                NodePropertyFunc.class,
+                VersionFunc.class};
 
         for (Class f : functionsToRegister) {
             proceduresRegistry.registerFunction(f);

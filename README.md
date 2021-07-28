@@ -171,3 +171,13 @@ RETURN graphName,
 call gds.wcc.stream('g')
 yield nodeId, componentId
 ```
+
+### Stub Counts
+
+A router will generate a stub network for its loopback, point-to-point networks, and any broadcast network where there is no BDR or DROTHER.
+
+```
+match (s:STUB)<-[:LINKED]-(n:ROUTER)
+return s.name as Stub, count(n) as ConnectedRouters
+order by ConnectedRouters desc
+```
